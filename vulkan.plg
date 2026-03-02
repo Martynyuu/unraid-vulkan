@@ -34,8 +34,8 @@ echo " Version: &version;"
 echo "=============================================="
 
 # Create directories
-mkdir -p &amp;pluginLOC;
-mkdir -p &amp;emhttpLOC;
+mkdir -p /boot/config/plugins/vulkan
+mkdir -p /usr/local/emhttp/plugins/vulkan
 mkdir -p /etc/vulkan/icd.d
 mkdir -p /usr/share/vulkan/icd.d
 
@@ -95,7 +95,7 @@ echo "Removing Vulkan Support..."
 rm -f /etc/vulkan/icd.d/nvidia_icd.json
 rm -f /usr/share/vulkan/icd.d/nvidia_icd.json
 rm -f /etc/profile.d/vulkan.sh
-rm -rf &amp;emhttpLOC;
+rm -rf /usr/local/emhttp/plugins/vulkan
 echo "Done."
 </INLINE>
 </FILE>
