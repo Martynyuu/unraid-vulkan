@@ -3,8 +3,9 @@
   <Plugin>
     <Name>Vulkan Support</Name>
     <PluginURL>https://raw.githubusercontent.com/Martynyuu/unraid-vulkan/main/vulkan.plg</PluginURL>
-    <PluginAuthor>spiral-reality</PluginAuthor>
+    <PluginAuthor>Martynyuu</PluginAuthor>
     <Category>Drivers: Productivity:</Category>
+    <DonateLink>https://ko-fi.com/strudel9</DonateLink>
     <Description>
 Provides Vulkan loader, tools, and ICD configuration for NVIDIA GPUs on Unraid. 
 Essential for running GPU-accelerated applications like RealityScan, Blender, 
