@@ -1,0 +1,20 @@
+# Build artifacts
+build/
+*.txz
+*.md5
+*.sha256
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log

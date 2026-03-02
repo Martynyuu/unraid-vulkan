@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Containers>
+  <Plugin>
+    <Name>Vulkan Support</Name>
+    <PluginURL>https://raw.githubusercontent.com/Martynyuu/unraid-vulkan/main/vulkan.plg</PluginURL>
+    <PluginAuthor>spiral-reality</PluginAuthor>
+    <Category>Drivers: Productivity:</Category>
+    <Description>
+Provides Vulkan loader, tools, and ICD configuration for NVIDIA GPUs on Unraid. 
+Essential for running GPU-accelerated applications like RealityScan, Blender, 
+and other Vulkan-dependent software in Docker containers.
+
+Features:
+- Vulkan Loader (libvulkan)
+- Vulkan Tools (vulkaninfo)
+- Docker-ready ICD configuration
+- Web UI status page
+
+Requirements:
+- Unraid 6.10+
+- NVIDIA GPU
+- NVIDIA Driver plugin installed
+    </Description>
+    <Requires>NVIDIA Driver Plugin</Requires>
+    <Repository>https://github.com/Martynyuu/unraid-vulkan</Repository>
+    <Support>https://github.com/Martynyuu/unraid-vulkan/issues</Support>
+    <Icon>https://raw.githubusercontent.com/Martynyuu/unraid-vulkan/main/icon.png</Icon>
+    <MinVer>6.10.0</MinVer>
+    <Date>2026-03-02</Date>
+    <Changes>
+### 2026.03.02
+- Initial release
+- Vulkan loader and tools for NVIDIA GPUs
+- ICD configuration for Docker containers
+    </Changes>
+  </Plugin>
+</Containers>

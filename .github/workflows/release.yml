@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget curl
+      
+      - name: Build package
+        run: |
+          chmod +x build.sh
+          ./build.sh ${{ steps.version.outputs.VERSION }}
+      
+      - name: Update PLG with checksums
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          MD5=$(cat packages/vulkan-${VERSION}.txz.md5 | cut -d' ' -f1)
+          SHA256=$(cat packages/vulkan-${VERSION}.txz.sha256 | cut -d' ' -f1)
+          
+          # Update version in PLG
+          sed -i "s/<!ENTITY version.*\".*\">/<!ENTITY version     \"${VERSION}\">/" vulkan.plg
+          
+          echo "Package MD5: ${MD5}"
+          echo "Package SHA256: ${SHA256}"
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            packages/vulkan-*.txz
+            packages/vulkan-*.txz.md5
+            packages/vulkan-*.txz.sha256
+            vulkan.plg
+          body: |
+            ## Vulkan Support for Unraid v${{ steps.version.outputs.VERSION }}
+            
+            ### Installation
+            ```bash
+            plugin install https://raw.githubusercontent.com/spiral-reality/unraid-vulkan/main/vulkan.plg
+            ```
+            
+            Or install via Community Applications.
+            
+            ### Changes
+            See [CHANGELOG](https://github.com/spiral-reality/unraid-vulkan/blob/main/CHANGELOG.md)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
