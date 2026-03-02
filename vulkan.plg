@@ -1,12 +1,10 @@
 <?xml version='1.0' standalone='yes'?>
 <!DOCTYPE PLUGIN [
   <!ENTITY name        "vulkan">
-  <!ENTITY author      "spiral-reality">
+  <!ENTITY author      "Martynyuu">
   <!ENTITY version     "2026.03.02">
-  <!ENTITY launch      "Settings/&name;">
   <!ENTITY github      "Martynyuu/unraid-vulkan">
   <!ENTITY pluginURL   "https://raw.githubusercontent.com/&github;/main/&name;.plg">
-  <!ENTITY packageURL  "https://github.com/&github;/releases/download/&version;">
   <!ENTITY pluginLOC   "/boot/config/plugins/&name;">
   <!ENTITY emhttpLOC   "/usr/local/emhttp/plugins/&name;">
 ]>
@@ -14,87 +12,35 @@
 <PLUGIN  name="&name;"
          author="&author;"
          version="&version;"
-         launch="&launch;"
          pluginURL="&pluginURL;"
          icon="microchip"
          min="6.10.0"
          support="https://github.com/&github;/issues"
-         project="https://github.com/&github;"
-         readme="https://github.com/&github;#readme"
 >
 
 <CHANGES>
-### &version;
+###2026.03.02
 - Initial release
-- Vulkan loader and tools for NVIDIA GPUs
-- ICD configuration for Docker containers
-- Support for RealityScan and other Vulkan-dependent applications
+- NVIDIA Vulkan ICD configuration
+- Docker container support
 </CHANGES>
 
-<!--
-===========================================
-PRE-INSTALL: Check for NVIDIA driver
-===========================================
--->
 <FILE Run="/bin/bash">
 <INLINE>
 echo ""
 echo "=============================================="
-echo " Vulkan Support for Unraid"
+echo " Installing Vulkan Support for Unraid"
 echo " Version: &version;"
 echo "=============================================="
-echo ""
 
-# Check for NVIDIA driver
-if ! command -v nvidia-smi &amp;> /dev/null; then
-    echo "WARNING: NVIDIA driver not detected."
-    echo "Vulkan requires NVIDIA drivers to be installed."
-    echo "Please install the NVIDIA Driver plugin first."
-    echo ""
-fi
-
-# Create plugin directory
-mkdir -p &pluginLOC;
-mkdir -p &emhttpLOC;
-</INLINE>
-</FILE>
-
-<!--
-===========================================
-DOWNLOAD: Vulkan Loader Package
-===========================================
--->
-<FILE Name="&pluginLOC;/vulkan-&version;.txz" Run="upgradepkg --install-new">
-<URL>&packageURL;/vulkan-&version;.txz</URL>
-</FILE>
-
-<!--
-===========================================
-POST-INSTALL: Configure Vulkan ICD
-===========================================
--->
-<FILE Run="/bin/bash">
-<INLINE>
-# Create Vulkan ICD directory
+# Create directories
+mkdir -p &amp;pluginLOC;
+mkdir -p &amp;emhttpLOC;
 mkdir -p /etc/vulkan/icd.d
 mkdir -p /usr/share/vulkan/icd.d
 
-# Create NVIDIA ICD configuration if NVIDIA driver exists
-if [ -f /usr/lib64/libnvidia-glcore.so* ] || [ -f /usr/lib/x86_64-linux-gnu/libnvidia-glcore.so* ]; then
-    # Find the actual NVIDIA Vulkan ICD JSON
-    NVIDIA_ICD=""
-    for path in /usr/share/vulkan/icd.d/nvidia_icd.json \
-                /etc/vulkan/icd.d/nvidia_icd.json \
-                /usr/lib/x86_64-linux-gnu/nvidia/vulkan/icd.d/nvidia_icd.json; do
-        if [ -f "$path" ]; then
-            NVIDIA_ICD="$path"
-            break
-        fi
-    done
-    
-    # If no existing ICD, create one
-    if [ -z "$NVIDIA_ICD" ]; then
-        cat > /etc/vulkan/icd.d/nvidia_icd.json &lt;&lt;'NVIDIA_EOF'
+# Create NVIDIA ICD configuration
+cat &gt; /etc/vulkan/icd.d/nvidia_icd.json &lt;&lt;ICDEOF
 {
     "file_format_version": "1.0.0",
     "ICD": {
@@ -102,42 +48,25 @@ if [ -f /usr/lib64/libnvidia-glcore.so* ] || [ -f /usr/lib/x86_64-linux-gnu/libn
         "api_version": "1.3"
     }
 }
-NVIDIA_EOF
-        echo "Created NVIDIA Vulkan ICD configuration"
-    fi
-fi
+ICDEOF
 
-# Create symlinks for Docker container compatibility
-ln -sf /etc/vulkan/icd.d /usr/share/vulkan/icd.d 2>/dev/null || true
+# Symlink for compatibility
+ln -sf /etc/vulkan/icd.d/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json 2&gt;/dev/null
 
-# Set environment variables for the system
-cat > /etc/profile.d/vulkan.sh &lt;&lt;'EOF'
-# Vulkan environment variables
+# Environment variables
+cat &gt; /etc/profile.d/vulkan.sh &lt;&lt;ENVEOF
 export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
 export NVIDIA_DRIVER_CAPABILITIES=all
-EOF
+ENVEOF
 chmod +x /etc/profile.d/vulkan.sh
 
 echo ""
+echo " Vulkan ICD configuration installed!"
+echo " For Docker, mount: -v /etc/vulkan/icd.d:/etc/vulkan/icd.d:ro"
 echo "=============================================="
-echo " Vulkan Support installed successfully!"
-echo ""
-echo " To verify installation, run:"
-echo "   vulkaninfo --summary"
-echo ""
-echo " For Docker containers, mount:"
-echo "   -v /etc/vulkan/icd.d:/etc/vulkan/icd.d:ro"
-echo "   -v /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro"
-echo "=============================================="
-echo ""
 </INLINE>
 </FILE>
 
-<!--
-===========================================
-WEB UI PAGE
-===========================================
--->
 <FILE Name="&emhttpLOC;/&name;.page">
 <INLINE>
 Menu="Utilities"
@@ -145,76 +74,29 @@ Title="Vulkan Support"
 Icon="microchip"
 ---
 &lt;?php
-$vulkan_version = "&version;";
-
-// Check Vulkan status
-$vulkaninfo = shell_exec('vulkaninfo --summary 2>&amp;1');
-$nvidia_smi = shell_exec('nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>&amp;1');
-
-$vulkan_available = (strpos($vulkaninfo, 'deviceName') !== false || strpos($vulkaninfo, 'GPU') !== false);
-$nvidia_available = (strpos($nvidia_smi, 'NVIDIA') !== false || !empty(trim($nvidia_smi)));
+$nvidia_smi = shell_exec('nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2&gt;/dev/null');
+$icd_exists = file_exists('/etc/vulkan/icd.d/nvidia_icd.json');
 ?&gt;
-
-&lt;div style="padding: 20px;"&gt;
-    &lt;h2&gt;Vulkan Support v&lt;?= $vulkan_version ?&gt;&lt;/h2&gt;
-    
-    &lt;h3&gt;Status&lt;/h3&gt;
-    &lt;table class="settings"&gt;
-        &lt;tr&gt;
-            &lt;td&gt;NVIDIA Driver:&lt;/td&gt;
-            &lt;td&gt;&lt;?= $nvidia_available ? '&lt;span style="color:green"&gt;✓ Detected&lt;/span&gt;' : '&lt;span style="color:red"&gt;✗ Not Found&lt;/span&gt;' ?&gt;&lt;/td&gt;
-        &lt;/tr&gt;
-        &lt;tr&gt;
-            &lt;td&gt;Vulkan:&lt;/td&gt;
-            &lt;td&gt;&lt;?= $vulkan_available ? '&lt;span style="color:green"&gt;✓ Available&lt;/span&gt;' : '&lt;span style="color:red"&gt;✗ Not Available&lt;/span&gt;' ?&gt;&lt;/td&gt;
-        &lt;/tr&gt;
-    &lt;/table&gt;
-    
-    &lt;?php if ($nvidia_available): ?&gt;
-    &lt;h3&gt;GPU Information&lt;/h3&gt;
-    &lt;pre style="background:#1a1a1a; padding:15px; border-radius:5px; overflow-x:auto;"&gt;&lt;?= htmlspecialchars($nvidia_smi) ?&gt;&lt;/pre&gt;
-    &lt;?php endif; ?&gt;
-    
-    &lt;?php if ($vulkan_available): ?&gt;
-    &lt;h3&gt;Vulkan Information&lt;/h3&gt;
-    &lt;pre style="background:#1a1a1a; padding:15px; border-radius:5px; overflow-x:auto; max-height:400px;"&gt;&lt;?= htmlspecialchars($vulkaninfo) ?&gt;&lt;/pre&gt;
-    &lt;?php endif; ?&gt;
-    
-    &lt;h3&gt;Docker Usage&lt;/h3&gt;
-    &lt;p&gt;To enable Vulkan in Docker containers, add these volume mounts:&lt;/p&gt;
-    &lt;pre style="background:#1a1a1a; padding:15px; border-radius:5px;"&gt;
--v /etc/vulkan/icd.d:/etc/vulkan/icd.d:ro
--v /usr/share/vulkan/icd.d:/usr/share/vulkan/icd.d:ro
+&lt;div style="padding:20px"&gt;
+&lt;h2&gt;Vulkan Support&lt;/h2&gt;
+&lt;p&gt;&lt;b&gt;NVIDIA Driver:&lt;/b&gt; &lt;?= !empty(trim($nvidia_smi)) ? trim($nvidia_smi) : 'Not detected' ?&gt;&lt;/p&gt;
+&lt;p&gt;&lt;b&gt;Vulkan ICD:&lt;/b&gt; &lt;?= $icd_exists ? 'Configured' : 'Missing' ?&gt;&lt;/p&gt;
+&lt;h3&gt;Docker Usage&lt;/h3&gt;
+&lt;pre&gt;-v /etc/vulkan/icd.d:/etc/vulkan/icd.d:ro
 --gpus all
 -e NVIDIA_DRIVER_CAPABILITIES=all&lt;/pre&gt;
 &lt;/div&gt;
 </INLINE>
 </FILE>
 
-<!--
-===========================================
-REMOVE SCRIPT
-===========================================
--->
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 echo "Removing Vulkan Support..."
-
-# Remove the package
-removepkg vulkan-&version; 2>/dev/null
-
-# Remove configuration files
+rm -f /etc/vulkan/icd.d/nvidia_icd.json
+rm -f /usr/share/vulkan/icd.d/nvidia_icd.json
 rm -f /etc/profile.d/vulkan.sh
-rm -rf &emhttpLOC;
-
-# Keep ICD config as it may be needed by other software
-# rm -rf /etc/vulkan/icd.d
-
-echo ""
-echo "=============================================="
-echo " Vulkan Support has been removed."
-echo "=============================================="
-echo ""
+rm -rf &amp;emhttpLOC;
+echo "Done."
 </INLINE>
 </FILE>
 
