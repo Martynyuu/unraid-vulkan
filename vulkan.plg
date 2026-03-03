@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name        "vulkan">
   <!ENTITY author      "Martynyuu">
-  <!ENTITY version     "2026.03.02a">
+  <!ENTITY version     "2026.03.02b">
   <!ENTITY github      "Martynyuu/unraid-vulkan">
   <!ENTITY pluginURL   "https://raw.githubusercontent.com/&github;/main/&name;.plg">
   <!ENTITY pluginLOC   "/boot/config/plugins/&name;">
@@ -20,9 +20,12 @@
 >
 
 <CHANGES>
+###2026.03.02b
+- Fixed package download (using Ubuntu vulkan-tools)
+- vulkaninfo --summary now works in terminal
+
 ###2026.03.02a
 - Added vulkaninfo and Vulkan tools installation
-- vulkaninfo --summary now works in terminal
 
 ###2026.03.02
 - Initial release
@@ -31,9 +34,9 @@
 </CHANGES>
 
 <!-- Download Vulkan Tools Package -->
-<FILE Name="&pluginLOC;/vulkan-&pkgversion;.txz" Run="upgradepkg --install-new">
-<URL>https://github.com/&github;/releases/download/v&pkgversion;/vulkan-&pkgversion;.txz</URL>
-<MD5>PLACEHOLDER_MD5</MD5>
+<FILE Name="&pluginLOC;/vulkan-v&pkgversion;.txz" Run="upgradepkg --install-new">
+<URL>https://github.com/&github;/releases/download/v&pkgversion;/vulkan-v&pkgversion;.txz</URL>
+<MD5>bd8e2e5e55779a58fc5370d2c852e930</MD5>
 </FILE>
 
 <FILE Run="/bin/bash">
@@ -140,7 +143,7 @@ if ($vulkaninfo_exists) {
 echo "Removing Vulkan Support..."
 
 # Remove the Vulkan package
-removepkg vulkan-&pkgversion; 2&gt;/dev/null || true
+removepkg vulkan-v&pkgversion; 2&gt;/dev/null || true
 
 # Clean up configuration files
 rm -f /etc/vulkan/icd.d/nvidia_icd.json
