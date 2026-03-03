@@ -111,11 +111,18 @@ rm -rf "${BUILD_DIR}/usr/include"
 rm -rf "${BUILD_DIR}/usr/lib64/cmake"
 rm -rf "${BUILD_DIR}/usr/lib64/pkgconfig"
 
-# Create the package
+# Create the package (using tar, compatible with non-Slackware systems)
 echo ""
 echo "Creating package..."
 cd "${BUILD_DIR}"
-makepkg -l y -c n "${PACKAGES_DIR}/${PACKAGE_NAME}.txz"
+
+# makepkg is Slackware-specific, use tar directly for portability
+if command -v makepkg &>/dev/null; then
+    makepkg -l y -c n "${PACKAGES_DIR}/${PACKAGE_NAME}.txz"
+else
+    # Create txz manually (same as makepkg output)
+    tar cvJf "${PACKAGES_DIR}/${PACKAGE_NAME}.txz" .
+fi
 
 # Generate MD5
 cd "${PACKAGES_DIR}"
