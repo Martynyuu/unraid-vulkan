@@ -2,8 +2,7 @@
 #
 # Build script for Unraid Vulkan plugin package
 #
-# This script downloads Vulkan libraries from Slackware and packages them
-# for Unraid installation.
+# Downloads Vulkan libraries from Slackware and packages them for Unraid.
 #
 
 set -e
@@ -12,21 +11,16 @@ VERSION="${1:-2026.03.02}"
 PACKAGE_NAME="vulkan-${VERSION}"
 BUILD_DIR="$(pwd)/build"
 PACKAGES_DIR="$(pwd)/packages"
-SRC_DIR="$(pwd)/src"
 
-# Slackware mirror and package info
-SLACKWARE_MIRROR="https://mirrors.slackware.com/slackware/slackware64-current/slackware64"
+# Slackware 15.0 packages (stable versions that work with Unraid 6.x)
+# Using direct URLs to avoid HTML parsing issues
+SLACKWARE_BASE="https://mirrors.slackware.com/slackware/slackware64-15.0/slackware64/l"
 
-# Required packages from Slackware
-VULKAN_PACKAGES=(
-    "l/Vulkan-Headers"
-    "l/Vulkan-Loader"  
-    "l/Vulkan-Tools"
-    "l/vulkan-extensionlayer"
-    "l/vulkan-validationlayers"
-    "l/spirv-headers"
-    "l/spirv-tools"
-    "l/glslang"
+# Direct package filenames (Slackware 15.0)
+declare -A PACKAGES=(
+    ["Vulkan-Loader"]="Vulkan-Loader-1.3.204-x86_64-1.txz"
+    ["Vulkan-Tools"]="Vulkan-Tools-1.3.204-x86_64-1.txz"
+    ["spirv-tools"]="spirv-tools-2022.1-x86_64-1.txz"
 )
 
 echo "=========================================="
@@ -43,42 +37,62 @@ mkdir -p "${PACKAGES_DIR}"
 # Create package directory structure
 mkdir -p "${BUILD_DIR}/usr/bin"
 mkdir -p "${BUILD_DIR}/usr/lib64"
-mkdir -p "${BUILD_DIR}/usr/share/vulkan/icd.d"
-mkdir -p "${BUILD_DIR}/usr/share/vulkan/explicit_layer.d"
-mkdir -p "${BUILD_DIR}/usr/share/vulkan/implicit_layer.d"
+mkdir -p "${BUILD_DIR}/usr/share/vulkan"
 mkdir -p "${BUILD_DIR}/etc/vulkan/icd.d"
-mkdir -p "${BUILD_DIR}/usr/local/emhttp/plugins/vulkan"
 
-# Download and extract Slackware packages
-echo "Downloading Vulkan packages from Slackware..."
+# Download and extract packages
+echo "Downloading Vulkan packages from Slackware 15.0..."
 TEMP_DIR=$(mktemp -d)
+DOWNLOAD_OK=0
 
-for pkg_path in "${VULKAN_PACKAGES[@]}"; do
-    pkg_name=$(basename "${pkg_path}")
-    echo "  Fetching ${pkg_name}..."
+for pkg_name in "${!PACKAGES[@]}"; do
+    pkg_file="${PACKAGES[$pkg_name]}"
+    url="${SLACKWARE_BASE}/${pkg_file}"
     
-    # Get package listing to find exact filename
-    pkg_url=$(curl -sL "${SLACKWARE_MIRROR}/${pkg_path}/" | grep -oP 'href="[^"]+\.txz"' | head -1 | sed 's/href="//;s/"//')
+    echo "  ${pkg_name}..."
+    echo "    URL: ${url}"
     
-    if [ -n "${pkg_url}" ]; then
-        wget -q "${SLACKWARE_MIRROR}/${pkg_path}/${pkg_url}" -O "${TEMP_DIR}/${pkg_url}" 2>/dev/null || {
-            echo "    Warning: Could not download ${pkg_name}"
-            continue
-        }
+    if wget --timeout=30 -q "${url}" -O "${TEMP_DIR}/${pkg_file}"; then
+        size=$(stat -f%z "${TEMP_DIR}/${pkg_file}" 2>/dev/null || stat -c%s "${TEMP_DIR}/${pkg_file}" 2>/dev/null || echo "?")
+        echo "    Downloaded: ${size} bytes"
         
-        # Extract to build directory
-        cd "${BUILD_DIR}"
-        tar xf "${TEMP_DIR}/${pkg_url}" 2>/dev/null || true
-        cd - > /dev/null
-        echo "    ✓ ${pkg_url}"
+        if [ "${size}" != "?" ] && [ "${size}" -gt 1000 ]; then
+            cd "${BUILD_DIR}"
+            tar xf "${TEMP_DIR}/${pkg_file}" 2>/dev/null && echo "    ✓ Extracted" || echo "    ⚠ Extract warning"
+            cd - > /dev/null
+            DOWNLOAD_OK=$((DOWNLOAD_OK + 1))
+        else
+            echo "    ⚠ File too small, skipping"
+        fi
     else
-        echo "    Warning: Package not found: ${pkg_name}"
+        echo "    ✗ Download failed"
     fi
 done
 
 rm -rf "${TEMP_DIR}"
 
-# Create package description
+echo ""
+echo "Downloaded ${DOWNLOAD_OK}/${#PACKAGES[@]} packages"
+
+# Verify critical files
+echo ""
+echo "Checking for critical files..."
+VULKANINFO="${BUILD_DIR}/usr/bin/vulkaninfo"
+LIBVULKAN="${BUILD_DIR}/usr/lib64/libvulkan.so.1"
+
+if [ -f "${VULKANINFO}" ]; then
+    echo "  ✓ vulkaninfo found"
+else
+    echo "  ✗ vulkaninfo NOT found"
+fi
+
+if [ -f "${LIBVULKAN}" ] || ls "${BUILD_DIR}/usr/lib64/libvulkan"* &>/dev/null 2>&1; then
+    echo "  ✓ libvulkan found"
+else
+    echo "  ✗ libvulkan NOT found"
+fi
+
+# Create package metadata
 cat > "${BUILD_DIR}/install/slack-desc" <<EOF
 vulkan: Vulkan Support for Unraid
 vulkan:
@@ -94,46 +108,47 @@ vulkan:
 vulkan: https://github.com/Martynyuu/unraid-vulkan
 EOF
 
-# Create post-install script
 cat > "${BUILD_DIR}/install/doinst.sh" <<'EOF'
 #!/bin/bash
-# Update library cache
 ldconfig 2>/dev/null || true
-
-# Ensure vulkaninfo is executable
 chmod +x /usr/bin/vulkaninfo 2>/dev/null || true
 EOF
 
-# Remove unnecessary files to reduce package size
-rm -rf "${BUILD_DIR}/usr/doc"
-rm -rf "${BUILD_DIR}/usr/man"
-rm -rf "${BUILD_DIR}/usr/include"
-rm -rf "${BUILD_DIR}/usr/lib64/cmake"
-rm -rf "${BUILD_DIR}/usr/lib64/pkgconfig"
+# Cleanup unnecessary files
+rm -rf "${BUILD_DIR}/usr/doc" "${BUILD_DIR}/usr/man" "${BUILD_DIR}/usr/include"
+rm -rf "${BUILD_DIR}/usr/lib64/cmake" "${BUILD_DIR}/usr/lib64/pkgconfig"
+rm -rf "${BUILD_DIR}/install/slack-*" 2>/dev/null || true
 
-# Create the package (using tar, compatible with non-Slackware systems)
+# Keep only our slack-desc
+cat > "${BUILD_DIR}/install/slack-desc" <<EOF
+vulkan: Vulkan Support for Unraid
+vulkan:
+vulkan: https://github.com/Martynyuu/unraid-vulkan
+EOF
+
+# Create the package
 echo ""
 echo "Creating package..."
 cd "${BUILD_DIR}"
 
-# makepkg is Slackware-specific, use tar directly for portability
 if command -v makepkg &>/dev/null; then
     makepkg -l y -c n "${PACKAGES_DIR}/${PACKAGE_NAME}.txz"
 else
-    # Create txz manually (same as makepkg output)
-    tar cvJf "${PACKAGES_DIR}/${PACKAGE_NAME}.txz" .
+    tar cJf "${PACKAGES_DIR}/${PACKAGE_NAME}.txz" .
 fi
 
-# Generate MD5
+# Generate checksums
 cd "${PACKAGES_DIR}"
 md5sum "${PACKAGE_NAME}.txz" > "${PACKAGE_NAME}.txz.md5"
 sha256sum "${PACKAGE_NAME}.txz" > "${PACKAGE_NAME}.txz.sha256"
+
+SIZE=$(du -h "${PACKAGE_NAME}.txz" | cut -f1)
+MD5=$(cat "${PACKAGE_NAME}.txz.md5" | cut -d' ' -f1)
 
 echo ""
 echo "=========================================="
 echo " Build complete!"
 echo ""
-echo " Package: ${PACKAGES_DIR}/${PACKAGE_NAME}.txz"
-echo " MD5:     $(cat ${PACKAGE_NAME}.txz.md5 | cut -d' ' -f1)"
-echo " SHA256:  $(cat ${PACKAGE_NAME}.txz.sha256 | cut -d' ' -f1)"
+echo " Package: ${PACKAGE_NAME}.txz (${SIZE})"
+echo " MD5:     ${MD5}"
 echo "=========================================="
