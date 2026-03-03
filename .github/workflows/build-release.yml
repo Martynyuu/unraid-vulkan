@@ -1,0 +1,172 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 2026.03.02)'
+        required: true
+        default: '2026.03.02'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Slackware Vulkan packages
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BUILD_DIR="build"
+          SLACKWARE_MIRROR="https://mirrors.slackware.com/slackware/slackware64-current/slackware64"
+          
+          mkdir -p "${BUILD_DIR}/usr/bin"
+          mkdir -p "${BUILD_DIR}/usr/lib64"
+          mkdir -p "${BUILD_DIR}/usr/share/vulkan"
+          mkdir -p "${BUILD_DIR}/etc/vulkan/icd.d"
+          mkdir -p "${BUILD_DIR}/install"
+          
+          # Packages to download
+          PACKAGES=(
+            "l/Vulkan-Loader"
+            "l/Vulkan-Tools"
+            "l/spirv-tools"
+          )
+          
+          for pkg_path in "${PACKAGES[@]}"; do
+            pkg_name=$(basename "${pkg_path}")
+            echo "Fetching ${pkg_name}..."
+            
+            # Get the actual package filename
+            pkg_url=$(curl -sL "${SLACKWARE_MIRROR}/${pkg_path}/" | grep -oP 'href="\K[^"]+\.txz(?=")' | head -1)
+            
+            if [ -n "${pkg_url}" ]; then
+              echo "  Downloading ${pkg_url}..."
+              wget -q "${SLACKWARE_MIRROR}/${pkg_path}/${pkg_url}" -O "/tmp/${pkg_url}"
+              
+              # Extract to build directory
+              cd "${BUILD_DIR}"
+              tar xf "/tmp/${pkg_url}" 2>/dev/null || true
+              cd ..
+              echo "  ✓ ${pkg_name}"
+            else
+              echo "  ⚠ Package not found: ${pkg_name}"
+            fi
+          done
+
+      - name: Create package metadata
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BUILD_DIR="build"
+          
+          # Create slack-desc
+          cat > "${BUILD_DIR}/install/slack-desc" <<'EOF'
+          vulkan: Vulkan Support for Unraid
+          vulkan:
+          vulkan: Provides Vulkan loader, tools, and ICD configuration for
+          vulkan: NVIDIA GPUs on Unraid systems. Required for GPU-accelerated
+          vulkan: applications like RealityScan in Docker containers.
+          vulkan:
+          vulkan: Includes:
+          vulkan:   - Vulkan Loader (libvulkan)
+          vulkan:   - Vulkan Tools (vulkaninfo)
+          vulkan:   - SPIR-V tools
+          vulkan:
+          vulkan: https://github.com/Martynyuu/unraid-vulkan
+          EOF
+          
+          # Create doinst.sh
+          cat > "${BUILD_DIR}/install/doinst.sh" <<'EOF'
+          #!/bin/bash
+          ldconfig 2>/dev/null || true
+          chmod +x /usr/bin/vulkaninfo 2>/dev/null || true
+          EOF
+          
+          # Remove unnecessary files
+          rm -rf "${BUILD_DIR}/usr/doc"
+          rm -rf "${BUILD_DIR}/usr/man"
+          rm -rf "${BUILD_DIR}/usr/include"
+          rm -rf "${BUILD_DIR}/usr/lib64/cmake"
+          rm -rf "${BUILD_DIR}/usr/lib64/pkgconfig"
+
+      - name: Create .txz package
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BUILD_DIR="build"
+          PACKAGE_NAME="vulkan-${VERSION}"
+          
+          mkdir -p packages
+          
+          cd "${BUILD_DIR}"
+          # Create txz (tar.xz with Slackware structure)
+          tar cvJf "../packages/${PACKAGE_NAME}.txz" .
+          cd ..
+          
+          # Generate checksums
+          cd packages
+          md5sum "${PACKAGE_NAME}.txz" > "${PACKAGE_NAME}.txz.md5"
+          sha256sum "${PACKAGE_NAME}.txz" > "${PACKAGE_NAME}.txz.sha256"
+          
+          echo "Package created: ${PACKAGE_NAME}.txz"
+          echo "MD5: $(cat ${PACKAGE_NAME}.txz.md5)"
+          
+          # Save MD5 for later use
+          echo "PKG_MD5=$(cut -d' ' -f1 ${PACKAGE_NAME}.txz.md5)" >> $GITHUB_ENV
+
+      - name: Update plugin with MD5
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          sed -i "s/PLACEHOLDER_MD5/${PKG_MD5}/" vulkan.plg
+          
+          echo "Updated vulkan.plg with MD5: ${PKG_MD5}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-package
+          path: |
+            packages/*.txz
+            packages/*.md5
+            packages/*.sha256
+            vulkan.plg
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            packages/*.txz
+            packages/*.md5
+            packages/*.sha256
+          body: |
+            ## Vulkan Support for Unraid v${{ steps.version.outputs.VERSION }}
+            
+            ### Installation
+            ```bash
+            plugin install https://raw.githubusercontent.com/Martynyuu/unraid-vulkan/main/vulkan.plg
+            ```
+            
+            ### Verify
+            ```bash
+            vulkaninfo --summary
+            ```
+            
+            ### MD5
+            `${{ env.PKG_MD5 }}`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
