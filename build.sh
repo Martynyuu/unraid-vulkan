@@ -2,7 +2,7 @@
 #
 # Build script for Unraid Vulkan plugin package
 #
-# Downloads vulkaninfo from LunarG SDK and packages for Unraid.
+# Downloads vulkaninfo and libvulkan from Ubuntu and packages for Unraid.
 #
 
 set -e
@@ -12,13 +12,9 @@ PACKAGE_NAME="vulkan-${VERSION}"
 BUILD_DIR="$(pwd)/build"
 PACKAGES_DIR="$(pwd)/packages"
 
-# LunarG SDK version (use latest stable)
-SDK_VERSION="1.3.296.0"
-
 echo "=========================================="
 echo " Building Vulkan Package for Unraid"
 echo " Version: ${VERSION}"
-echo " SDK: ${SDK_VERSION}"
 echo "=========================================="
 echo ""
 
@@ -33,32 +29,33 @@ mkdir -p "${BUILD_DIR}/usr/lib64"
 mkdir -p "${BUILD_DIR}/usr/share/vulkan"
 mkdir -p "${BUILD_DIR}/etc/vulkan/icd.d"
 
-# Download vulkan tools from Ubuntu packages (most compatible)
-echo "Downloading Vulkan components..."
+# Download from Ubuntu mirrors (verified working URLs)
+echo "Downloading Vulkan components from Ubuntu..."
 TEMP_DIR=$(mktemp -d)
 cd "${TEMP_DIR}"
 
-# Ubuntu jammy (22.04) packages work well on Unraid
-UBUNTU_MIRROR="http://archive.ubuntu.com/ubuntu/pool/universe/v"
-
-# vulkan-tools contains vulkaninfo
-echo "  Fetching vulkan-tools..."
-VULKAN_TOOLS_DEB="vulkan-tools_1.3.204.1-2_amd64.deb"
-if wget -q "${UBUNTU_MIRROR}/vulkan-tools/${VULKAN_TOOLS_DEB}" -O vulkan-tools.deb; then
+# vulkan-tools (contains vulkaninfo)
+VULKAN_TOOLS_URL="http://mirrors.kernel.org/ubuntu/pool/universe/v/vulkan-tools/vulkan-tools_1.3.204.0+dfsg1-1_amd64.deb"
+echo "  Downloading vulkan-tools..."
+if wget -q --timeout=60 "${VULKAN_TOOLS_URL}" -O vulkan-tools.deb; then
+    SIZE=$(stat -c%s vulkan-tools.deb 2>/dev/null || stat -f%z vulkan-tools.deb 2>/dev/null)
+    echo "    Downloaded: ${SIZE} bytes"
     ar x vulkan-tools.deb
-    tar xf data.tar.* -C "${BUILD_DIR}"
-    echo "    ✓ vulkan-tools"
+    tar xf data.tar.* -C "${BUILD_DIR}" 2>/dev/null || tar xf data.tar.* -C "${BUILD_DIR}"
+    echo "    ✓ vulkan-tools extracted"
 else
     echo "    ✗ Failed to download vulkan-tools"
 fi
 
-# libvulkan1 contains the loader
-echo "  Fetching libvulkan1..."
-LIBVULKAN_DEB="libvulkan1_1.3.204.1-2_amd64.deb"
-if wget -q "${UBUNTU_MIRROR}/vulkan-loader/${LIBVULKAN_DEB}" -O libvulkan1.deb; then
+# libvulkan1 (contains the Vulkan loader)
+LIBVULKAN_URL="http://mirrors.kernel.org/ubuntu/pool/main/v/vulkan-loader/libvulkan1_1.3.204.1-2_amd64.deb"
+echo "  Downloading libvulkan1..."
+if wget -q --timeout=60 "${LIBVULKAN_URL}" -O libvulkan1.deb; then
+    SIZE=$(stat -c%s libvulkan1.deb 2>/dev/null || stat -f%z libvulkan1.deb 2>/dev/null)
+    echo "    Downloaded: ${SIZE} bytes"
     ar x libvulkan1.deb
-    tar xf data.tar.* -C "${BUILD_DIR}"
-    echo "    ✓ libvulkan1"
+    tar xf data.tar.* -C "${BUILD_DIR}" 2>/dev/null || tar xf data.tar.* -C "${BUILD_DIR}"
+    echo "    ✓ libvulkan1 extracted"
 else
     echo "    ✗ Failed to download libvulkan1"
 fi
@@ -66,36 +63,40 @@ fi
 cd - > /dev/null
 rm -rf "${TEMP_DIR}"
 
-# Reorganize files for Slackware/Unraid
+# Reorganize for Slackware/Unraid (lib path differences)
 if [ -d "${BUILD_DIR}/usr/lib/x86_64-linux-gnu" ]; then
-    mv "${BUILD_DIR}/usr/lib/x86_64-linux-gnu"/* "${BUILD_DIR}/usr/lib64/" 2>/dev/null || true
-    rm -rf "${BUILD_DIR}/usr/lib/x86_64-linux-gnu"
+    cp -a "${BUILD_DIR}/usr/lib/x86_64-linux-gnu"/* "${BUILD_DIR}/usr/lib64/" 2>/dev/null || true
+    rm -rf "${BUILD_DIR}/usr/lib"
 fi
-rm -rf "${BUILD_DIR}/usr/lib" 2>/dev/null || true
+
+# Clean up unnecessary files
 rm -rf "${BUILD_DIR}/usr/share/doc" "${BUILD_DIR}/usr/share/man" "${BUILD_DIR}/usr/share/lintian" 2>/dev/null || true
+rm -rf "${BUILD_DIR}/usr/share/bug" 2>/dev/null || true
 
 # Verify critical files
 echo ""
-echo "Verifying files..."
+echo "Verifying installed files..."
 if [ -f "${BUILD_DIR}/usr/bin/vulkaninfo" ]; then
     echo "  ✓ vulkaninfo found"
     chmod +x "${BUILD_DIR}/usr/bin/vulkaninfo"
 else
-    echo "  ✗ vulkaninfo NOT found"
+    echo "  ✗ vulkaninfo NOT found - build failed"
+    exit 1
 fi
 
-if ls "${BUILD_DIR}/usr/lib64/libvulkan"* &>/dev/null 2>&1; then
+if ls "${BUILD_DIR}/usr/lib64/libvulkan.so"* &>/dev/null 2>&1; then
     echo "  ✓ libvulkan found"
+    ls -la "${BUILD_DIR}/usr/lib64/libvulkan"* 2>/dev/null | head -3
 else
-    echo "  ✗ libvulkan NOT found"
+    echo "  ⚠ libvulkan not found (may still work with system libs)"
 fi
 
 # Create package metadata
 cat > "${BUILD_DIR}/install/slack-desc" <<EOF
 vulkan: Vulkan Support for Unraid
 vulkan:
-vulkan: Provides Vulkan loader and tools for NVIDIA GPUs.
-vulkan: Run 'vulkaninfo --summary' to verify.
+vulkan: Provides Vulkan loader and tools (vulkaninfo) for GPU support.
+vulkan: Run 'vulkaninfo --summary' to verify installation.
 vulkan:
 vulkan: https://github.com/Martynyuu/unraid-vulkan
 EOF
@@ -127,3 +128,8 @@ echo ""
 echo " Package: ${PACKAGE_NAME}.txz (${SIZE})"
 echo " MD5:     ${MD5}"
 echo "=========================================="
+
+# Show what's in the package
+echo ""
+echo "Package contents:"
+tar -tf "${PACKAGE_NAME}.txz" | grep -E "(vulkaninfo|libvulkan)" | head -10
