@@ -135,3 +135,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - [GitHub Issues](https://github.com/Martynyuu/unraid-vulkan/issues)
 - [Unraid Forums](https://forums.unraid.net/)
+- If this project was helpful consider buying me a [hot chocolate](https://ko-fi.com/strudel9) 
