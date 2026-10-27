@@ -1,0 +1,4 @@
+# Unraid/Slackware and the build scripts need LF line endings.
+* text=auto eol=lf
+*.png binary
+*.txz binary
