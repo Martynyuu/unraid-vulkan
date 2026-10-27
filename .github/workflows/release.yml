@@ -1,66 +1,156 @@
-name: Release
+name: Build & Release
+
+# Pushes and pull requests: build and check the package only.
+# Release: Actions -> "Build & Release" -> Run workflow -> version (e.g. 2026.10.27).
+#   1. builds vulkan-<version>-x86_64-1.txz in ubuntu:20.04 (glibc 2.31; Unraid 6.10 has 2.33)
+#   2. writes version, pkgversion and md5 into vulkan.plg and commits that to main
+#   3. tags that commit v<version> and publishes the GitHub release
+# The tag therefore always points at a vulkan.plg whose MD5 matches the release asset,
+# and main (pluginURL) is never left with a stale MD5.
 
 on:
   push:
-    tags:
-      - '*'
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, YYYY.MM.DD with optional letter suffix (tag will be vYYYY.MM.DD)'
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    container: ubuntu:20.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential git ca-certificates curl xz-utils binutils file python3
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Determine version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="${INPUT_VERSION#v}"
+            if ! [[ "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}[a-z]?$ ]]; then
+              echo "::error::version must look like 2026.10.27 or 2026.10.27a, got '$INPUT_VERSION'"
+              exit 1
+            fi
+          else
+            VERSION="$(sed -n 's/.*<!ENTITY pkgversion *"\([^"]*\)".*/\1/p' vulkan.plg)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Validate vulkan.plg
+        run: python3 -c "import xml.dom.minidom as m; d=m.parse('vulkan.plg'); p=d.documentElement; print('PLG ok:', p.getAttribute('name'), p.getAttribute('version'), p.getAttribute('pluginURL'))"
+
+      - name: Build package
+        shell: bash
+        run: ./build.sh "${{ steps.version.outputs.version }}"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: package
+          path: packages/
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Get version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget curl
-      
-      - name: Build package
-        run: |
-          chmod +x build.sh
-          ./build.sh ${{ steps.version.outputs.VERSION }}
-      
-      - name: Update PLG with checksums
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          MD5=$(cat packages/vulkan-${VERSION}.txz.md5 | cut -d' ' -f1)
-          SHA256=$(cat packages/vulkan-${VERSION}.txz.sha256 | cut -d' ' -f1)
-          
-          # Update version in PLG
-          sed -i "s/<!ENTITY version.*\".*\">/<!ENTITY version     \"${VERSION}\">/" vulkan.plg
-          
-          echo "Package MD5: ${MD5}"
-          echo "Package SHA256: ${SHA256}"
-      
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: actions/checkout@v7
         with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download package
+        uses: actions/download-artifact@v8
+        with:
+          name: package
+          path: packages/
+
+      - name: Check tag is free
+        run: |
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::tag v$VERSION already exists"
+            exit 1
+          fi
+
+      - name: Write version and MD5 into vulkan.plg
+        id: plg
+        run: |
+          PKG="$(ls packages/vulkan-"$VERSION"-x86_64-*.txz)"
+          BUILD="$(basename "$PKG" .txz)"; BUILD="${BUILD##*-}"
+          MD5="$(md5sum "$PKG" | cut -d' ' -f1)"
+          sed -i -E \
+            -e "s|(<!ENTITY version +\")[^\"]*\"|\1$VERSION\"|" \
+            -e "s|(<!ENTITY pkgversion +\")[^\"]*\"|\1$VERSION\"|" \
+            -e "s|(<!ENTITY pkgbuild +\")[^\"]*\"|\1$BUILD\"|" \
+            -e "s|(<!ENTITY md5 +\")[^\"]*\"|\1$MD5\"|" \
+            vulkan.plg
+          grep -E '<!ENTITY (version|pkgversion|pkgbuild|md5) ' vulkan.plg
+          grep -q "<!ENTITY md5 *\"$MD5\"" vulkan.plg
+          python3 -c "import xml.dom.minidom as m; m.parse('vulkan.plg')"
+          grep -q "^###$VERSION\$" vulkan.plg || echo "::warning::no ###$VERSION entry in <CHANGES>"
+          echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
+
+      - name: Commit vulkan.plg to main and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vulkan.plg
+          git diff --cached --quiet || git commit -m "Release v$VERSION: update vulkan.plg version and MD5 [skip ci]"
+          git tag -a "v$VERSION" -m "Vulkan Support for Unraid v$VERSION"
+          git push origin HEAD:main "refs/tags/v$VERSION"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
           files: |
             packages/vulkan-*.txz
             packages/vulkan-*.txz.md5
             packages/vulkan-*.txz.sha256
             vulkan.plg
           body: |
-            ## Vulkan Support for Unraid v${{ steps.version.outputs.VERSION }}
-            
+            ## Vulkan Support for Unraid v${{ env.VERSION }}
+
             ### Installation
-            ```bash
-            plugin install https://raw.githubusercontent.com/spiral-reality/unraid-vulkan/main/vulkan.plg
+            Community Applications, or Plugins -> Install Plugin:
             ```
-            
-            Or install via Community Applications.
-            
+            https://raw.githubusercontent.com/Martynyuu/unraid-vulkan/main/vulkan.plg
+            ```
+
             ### Changes
-            See [CHANGELOG](https://github.com/spiral-reality/unraid-vulkan/blob/main/CHANGELOG.md)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            See [CHANGELOG](https://github.com/Martynyuu/unraid-vulkan/blob/v${{ env.VERSION }}/CHANGELOG.md)
