@@ -5,7 +5,7 @@
   <!ENTITY version     "2026.10.27">
   <!ENTITY pkgversion  "2026.10.27">
   <!ENTITY pkgbuild    "1">
-  <!ENTITY md5         "00000000000000000000000000000000">
+  <!ENTITY md5         "aff7049f010fb622e99acb38f38e7adb">
   <!ENTITY vulkansdk   "1.4.363.0">
   <!ENTITY github      "Martynyuu/unraid-vulkan">
   <!ENTITY pluginURL   "https://raw.githubusercontent.com/&github;/main/&name;.plg">
