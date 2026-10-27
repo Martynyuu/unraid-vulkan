@@ -30,7 +30,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: ubuntu:20.04
+    # Ubuntu 20.04 (glibc 2.31) with the dev headers the local build was verified with.
+    container: buildpack-deps:focal
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -40,7 +41,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential git ca-certificates curl xz-utils binutils file python3
+            build-essential git ca-certificates curl xz-utils binutils file python3 pkg-config
 
       - name: Checkout
         uses: actions/checkout@v7

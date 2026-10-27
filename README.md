@@ -121,9 +121,9 @@ Build on a system with glibc ≤ 2.33, otherwise the package will not run on Unr
 binaries need newer glibc symbols (`GLIBC_MAX`, default 2.33):
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src ubuntu:20.04 bash -c \
+docker run --rm -v "$PWD":/src -w /src buildpack-deps:focal bash -c \
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-     build-essential git ca-certificates curl xz-utils binutils file && ./build.sh'
+     build-essential git ca-certificates curl xz-utils binutils file python3 pkg-config && ./build.sh'
 ```
 
 The build also runs the packaged `vulkaninfo` against the Khronos mock driver as a smoke test.
